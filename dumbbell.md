@@ -1,0 +1,234 @@
+# Predicting the Class of Unilateral Dumbbell Biceps Curl
+Author: Poo, L. S.  
+Date: `r format(Sys.Date(), '%d %B %Y')`  
+
+## Overview
+
+In this project, I will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl correctly and incorrectly in 5 different ways:
+
+- **Class A**: exactly according to the specification
+- **Class B**: throwing the elbows to the front
+- **Class C**: lifting the dumbbell only halfway
+- **Class D**: lowering the dumbbell only halfway
+- **Class E**: throwing the hips to the front
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. The goal of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training data set. The data for this project comes from this source: [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har)
+
+The training data set is available here:
+[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+
+The test data set is available here:
+[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+## Exploratory Data Analyses
+
+The *caret* and *randomForest* packages are loaded for creating predictive models. The *ggplot2* package is loaded for illustration purposes. We need to set the seed. This is to improve the reproducibility of the analysis.
+
+
+```r
+library(caret)
+library(randomForest)
+library(ggplot2)
+set.seed(12345)
+```
+
+The training and test data sets are loaded. All empty strings and "NA" strings values are regarded as NA.
+
+
+```r
+training <- read.csv("~/MachineLearning/pml-training.csv", na.strings = c("NA", ""))
+testing <- read.csv("~/MachineLearning/pml-testing.csv", na.strings = c("NA", ""))
+```
+
+The dimensions of the training and test data sets are examined. 
+
+
+```r
+dim(training)
+```
+
+```
+## [1] 19622   160
+```
+
+```r
+dim(testing)
+```
+
+```
+## [1]  20 160
+```
+
+The count of each class of unilateral dumbbell biceps curl is plotted.
+
+
+```r
+ggplot(training, aes(x = classe, y = ..count.., fill = classe)) +
+    geom_bar(alpha = 0.3) +
+    labs(title = "Count of Each Class of Unilateral Dumbbell Biceps Curl") +
+    labs(x = "Class of Unilateral Dumbbell Biceps Curl") +
+    labs(y = "Count")
+```
+
+![](dumbbell_files/figure-html/unnamed-chunk-4-1.png)<!-- -->
+
+## Model Fitting, Cross Validation, and Expected Out of Sample Error
+
+Before building the model, we must identify which variables to be used in the model fitting. The variables with no NA in their respective columns are listed out.
+
+
+```r
+check_na <- vector()
+for (i in seq_len(length(names(training)))) {
+    if (sum(is.na(training[,i])) == 0)
+        check_na <- c(check_na, names(training)[i])
+}
+check_na
+```
+
+```
+##  [1] "X"                    "user_name"            "raw_timestamp_part_1"
+##  [4] "raw_timestamp_part_2" "cvtd_timestamp"       "new_window"          
+##  [7] "num_window"           "roll_belt"            "pitch_belt"          
+## [10] "yaw_belt"             "total_accel_belt"     "gyros_belt_x"        
+## [13] "gyros_belt_y"         "gyros_belt_z"         "accel_belt_x"        
+## [16] "accel_belt_y"         "accel_belt_z"         "magnet_belt_x"       
+## [19] "magnet_belt_y"        "magnet_belt_z"        "roll_arm"            
+## [22] "pitch_arm"            "yaw_arm"              "total_accel_arm"     
+## [25] "gyros_arm_x"          "gyros_arm_y"          "gyros_arm_z"         
+## [28] "accel_arm_x"          "accel_arm_y"          "accel_arm_z"         
+## [31] "magnet_arm_x"         "magnet_arm_y"         "magnet_arm_z"        
+## [34] "roll_dumbbell"        "pitch_dumbbell"       "yaw_dumbbell"        
+## [37] "total_accel_dumbbell" "gyros_dumbbell_x"     "gyros_dumbbell_y"    
+## [40] "gyros_dumbbell_z"     "accel_dumbbell_x"     "accel_dumbbell_y"    
+## [43] "accel_dumbbell_z"     "magnet_dumbbell_x"    "magnet_dumbbell_y"   
+## [46] "magnet_dumbbell_z"    "roll_forearm"         "pitch_forearm"       
+## [49] "yaw_forearm"          "total_accel_forearm"  "gyros_forearm_x"     
+## [52] "gyros_forearm_y"      "gyros_forearm_z"      "accel_forearm_x"     
+## [55] "accel_forearm_y"      "accel_forearm_z"      "magnet_forearm_x"    
+## [58] "magnet_forearm_y"     "magnet_forearm_z"     "classe"
+```
+
+The first 7 variables above ("X", "user\_name", "raw\_timestamp\_part\_1", "raw\_timestamp\_part\_2", "cvtd\_timestamp", "new\_window", "num\_window") are variables related to rows identification. They are not measurements from the accelerometers. Hence, they are not relevant in the model fitting. The remaining 52 variables are relevant measurements and will be used to fit the model to predict the "classe" values.
+
+Since the "classe" is a categorical outcome, accuracy is used to measure the errors. Accuracy on the training set (resubstitution accuracy) is optimistic. A better estimate comes from an independent set (test set accuracy). We cannot use the test set when building the model or it becomes part of the training set. We estimate the test set accuracy with the training set.
+
+The training set is splitted into sub\_training and sub\_testing sets.
+
+
+```r
+inTrain <- createDataPartition(training$classe, p = 0.8, list = FALSE)
+sub_training <- training[inTrain,]
+sub_testing <- training[-inTrain,]
+dim(sub_training)
+```
+
+```
+## [1] 15699   160
+```
+
+```r
+dim(sub_testing)
+```
+
+```
+## [1] 3923  160
+```
+
+Build a model on the sub\_training set. Predictive model is fitted with the *train* function. The *trainControl* function is used to control the computational nuances of the *train* function. Using the cross-validation "cv" resampling method, 5-fold cross-validation is performed on the sub\_training set. The *randomForest* algorithm is chosen because it is usually one of the top performing algorithms in prediction contests. It is often very accurate.
+
+
+```r
+ctrl <- trainControl(method = "cv", number = 5)
+fit <- train(classe ~ roll_belt + pitch_belt + yaw_belt + total_accel_belt + gyros_belt_x + gyros_belt_y + gyros_belt_z + accel_belt_x + accel_belt_y + accel_belt_z + magnet_belt_x + magnet_belt_y + magnet_belt_z + roll_arm + pitch_arm + yaw_arm + total_accel_arm + gyros_arm_x + gyros_arm_y + gyros_arm_z + accel_arm_x + accel_arm_y + accel_arm_z + magnet_arm_x + magnet_arm_y + magnet_arm_z + roll_dumbbell + pitch_dumbbell + yaw_dumbbell + total_accel_dumbbell + gyros_dumbbell_x + gyros_dumbbell_y + gyros_dumbbell_z + accel_dumbbell_x + accel_dumbbell_y + accel_dumbbell_z + magnet_dumbbell_x + magnet_dumbbell_y + magnet_dumbbell_z + roll_forearm + pitch_forearm + yaw_forearm + total_accel_forearm + gyros_forearm_x + gyros_forearm_y + gyros_forearm_z + accel_forearm_x + accel_forearm_y + accel_forearm_z + magnet_forearm_x + magnet_forearm_y + magnet_forearm_z, data = sub_training, method = "rf", trControl = ctrl)
+fit
+```
+
+```
+## Random Forest 
+## 
+## 15699 samples
+##    52 predictor
+##     5 classes: 'A', 'B', 'C', 'D', 'E' 
+## 
+## No pre-processing
+## Resampling: Cross-Validated (5 fold) 
+## Summary of sample sizes: 12559, 12560, 12559, 12561, 12557 
+## Resampling results across tuning parameters:
+## 
+##   mtry  Accuracy   Kappa    
+##    2    0.9929299  0.9910558
+##   27    0.9920385  0.9899277
+##   52    0.9881525  0.9850120
+## 
+## Accuracy was used to select the optimal model using  the largest value.
+## The final value used for the model was mtry = 2.
+```
+
+Evaluate the fitted model on the sub\_testing set. The accuracy and expected out of sample error are calculated.
+
+
+```r
+pred <- predict(fit, sub_testing)
+accuracy <- sum(pred == sub_testing$classe) / length(pred) * 100
+error <- 100 - accuracy
+```
+
+The accuracy of the predictive model is about **99.24%**.
+
+The expected out of sample error here is the expected percentage of wrongly predicted "classe" on the test set. The expected out of sample error is about **0.76%**.
+
+Using the fitted model, the confusion matrix of the predicted and actual values is as below:
+
+
+```r
+confusionMatrix(sub_testing$classe, pred)
+```
+
+```
+## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction    A    B    C    D    E
+##          A 1116    0    0    0    0
+##          B    5  753    1    0    0
+##          C    0    9  675    0    0
+##          D    0    0   13  630    0
+##          E    0    0    0    2  719
+## 
+## Overall Statistics
+##                                           
+##                Accuracy : 0.9924          
+##                  95% CI : (0.9891, 0.9948)
+##     No Information Rate : 0.2858          
+##     P-Value [Acc > NIR] : < 2.2e-16       
+##                                           
+##                   Kappa : 0.9903          
+##  Mcnemar's Test P-Value : NA              
+## 
+## Statistics by Class:
+## 
+##                      Class: A Class: B Class: C Class: D Class: E
+## Sensitivity            0.9955   0.9882   0.9797   0.9968   1.0000
+## Specificity            1.0000   0.9981   0.9972   0.9960   0.9994
+## Pos Pred Value         1.0000   0.9921   0.9868   0.9798   0.9972
+## Neg Pred Value         0.9982   0.9972   0.9957   0.9994   1.0000
+## Prevalence             0.2858   0.1942   0.1756   0.1611   0.1833
+## Detection Rate         0.2845   0.1919   0.1721   0.1606   0.1833
+## Detection Prevalence   0.2845   0.1935   0.1744   0.1639   0.1838
+## Balanced Accuracy      0.9978   0.9931   0.9884   0.9964   0.9997
+```
+
+## Test Set Prediction
+
+Using the cross-validated fitted model, the "classe" values in the test set are predicted.
+
+
+```r
+predict(fit, testing)
+```
+
+```
+##  [1] B A B A A E D B A A B C B A E E A B B B
+## Levels: A B C D E
+```
